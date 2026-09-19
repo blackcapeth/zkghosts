@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>zkGhosts — Shield the Ghosts</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background: #0a0a12;
+    color: #eae6ff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overflow-x: hidden;
+  }
+  body { display: flex; justify-content: center; padding: 24px 14px 50px; }
+  .wrap { max-width: 420px; width: 100%; }
+
+  h1 {
+    font-size: 22px;
+    font-weight: 800;
+    margin: 0 0 4px;
+    color: #ffc94d;
+    letter-spacing: -0.01em;
+  }
+  p.sub { font-size: 13px; color: #a89fd6; margin: 0 0 18px; line-height: 1.6; }
+
+  .levels { display: flex; gap: 8px; margin-bottom: 16px; }
+  .levels button {
+    flex: 1;
+    background: #16142a;
+    color: #cabfff;
+    border: 2px solid transparent;
+    border-radius: 10px;
+    padding: 9px 4px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .levels button.active { border-color: #ffc94d; color: #ffc94d; }
+
+  #startScreen { text-align: center; }
+  #startScreen button.start {
+    background: linear-gradient(90deg, #ffc94d, #7de3ff);
+    border: 0;
+    border-radius: 12px;
+    padding: 14px 26px;
+    font-size: 15px;
+    font-weight: 800;
+    color: #10101c;
+    cursor: pointer;
+    margin-top: 6px;
+  }
+
+  .legend { display: flex; gap: 10px; justify-content: center; margin-top: 16px; flex-wrap: wrap; }
+  .legend span { font-size: 11px; color: #a89fd6; display: flex; align-items: center; gap: 5px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+  .hud {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    color: #cabfff;
+    margin-bottom: 8px;
+    padding: 0 2px;
+  }
+  .hud b { color: #ffc94d; }
+
+  #canvasWrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 3 / 4;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid #221f3d;
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  .result { background: #16142a; border-radius: 16px; padding: 26px; text-align: center; }
+  .result .rank { font-size: 19px; font-weight: 800; margin: 0 0 6px; color: #ffc94d; }
+  .result .score { font-size: 42px; font-weight: 800; margin: 0 0 10px; }
+  .result p { font-size: 13px; color: #a89fd6; margin: 0 0 18px; }
+  .result button {
+    background: linear-gradient(90deg, #ffc94d, #7de3ff);
+    border: 0;
+    border-radius: 10px;
+    padding: 12px 20px;
+    font-size: 14px;
+    font-weight: 800;
+    color: #10101c;
+    cursor: pointer;
+  }
+
+  footer { font-size: 11px; color: #625c8a; line-height: 1.6; margin-top: 22px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>zkGhosts: Shield the Ghosts</h1>
+  <p class="sub">Ghosts drift across the void. Tap the gold and colored ones to shield them before they glitch. Avoid the corrupted red ones — they'll blow your cover.</p>
+
+  <div id="startScreen">
+    <div class="levels">
+      <button data-lvl="0">Sapling (calm)</button>
+      <button data-lvl="1" class="active">Orchard (normal)</button>
+      <button data-lvl="2">Full corruption</button>
+    </div>
+    <button class="start" id="startBtn">Enter the void</button>
+    <div class="legend">
+      <span><i class="dot" style="background:#ffd66b;"></i>shielded +30</span>
+      <span><i class="dot" style="background:#b98bff;"></i>orchard +15</span>
+      <span><i class="dot" style="background:#5fe0d0;"></i>sapling +10</span>
+      <span><i class="dot" style="background:#ff5a6e;"></i>glitch −20</span>
+    </div>
+  </div>
+
+  <div id="game" style="display:none;">
+    <div class="hud">
+      <span>Score: <b id="hudScore">0</b></span>
+      <span>Combo: <b id="hudCombo">x1</b></span>
+      <span>Time: <b id="hudTime">25</b></span>
+    </div>
+    <div id="canvasWrap"><canvas id="cv"></canvas></div>
+  </div>
+
+  <div id="finalScreen" style="display:none;">
+    <div class="result">
+      <p class="rank" id="rankOut">--</p>
+      <p class="score" id="scoreOut">0</p>
+      <p>final score</p>
+      <button id="againBtn">Go again</button>
+    </div>
+  </div>
+
+  <footer>
+    Unofficial fan game, not affiliated with the zkGhosts team.<br>
+    Screenshot your best score.
+  </footer>
+</div>
+
+<script>
+var canvas = document.getElementById('cv');
+var ctx = canvas.getContext('2d');
+var W, H;
+function resize() {
+  var wrap = document.getElementById('canvasWrap');
+  W = canvas.width = wrap.clientWidth * 2;
+  H = canvas.height = wrap.clientHeight * 2;
+}
+window.addEventListener('resize', resize);
+
+var level = 1;
+var LEVELS = [
+  { spawnBase: 650, spawnMin: 320, speed: 2.0 },
+  { spawnBase: 460, spawnMin: 200, speed: 2.6 },
+  { spawnBase: 300, spawnMin: 130, speed: 3.3 }
+];
+
+document.querySelectorAll('.levels button').forEach(function(b){
+  b.addEventListener('click', function(){
+    document.querySelectorAll('.levels button').forEach(function(x){ x.classList.remove('active'); });
+    this.classList.add('active');
+    level = parseInt(this.dataset.lvl);
+  });
+});
+
+var stars = [];
+function initStars() {
+  stars = [];
+  for (var i = 0; i < 60; i++) {
+    stars.push({ x: Math.random(), y: Math.random(), r: Math.random() * 1.6 + 0.4, p: Math.random() * Math.PI * 2 });
+  }
+}
+
+var TYPES = {
+  gold: { color: '#ffd66b', glow: '#ffe9a8', points: 30, weight: 8 },
+  orchard: { color: '#b98bff', glow: '#d9c2ff', points: 15, weight: 30 },
+  sapling: { color: '#5fe0d0', glow: '#aef2ea', points: 10, weight: 40 },
+  glitch: { color: '#ff5a6e', glow: '#ffb3ba', points: -20, weight: 22 }
+};
+
+var ghosts = [];
+var score = 0, combo = 1, timeLeft = 45, running = false;
+var lastSpawn = 0, elapsedMs = 0, rafId;
+
+function pickType() {
+  var total = 0;
+  for (var k in TYPES) total += TYPES[k].weight;
+  var r = Math.random() * total;
+  for (var k in TYPES) {
+    if (r < TYPES[k].weight) return k;
+    r -= TYPES[k].weight;
+  }
+  return 'sapling';
+}
+
+function spawnGhost() {
+  var type = pickType();
+  var size = (W * 0.09) * (0.85 + Math.random() * 0.4);
+  ghosts.push({
+    type: type,
+    x: size + Math.random() * (W - size * 2),
+    y: -size,
+    vy: (0.35 + Math.random() * 0.35) * LEVELS[level].speed * (H / 700),
+    vx: (Math.random() - 0.5) * 0.4 * (H / 700),
+    size: size,
+    born: performance.now(),
+    dead: false,
+    wobble: Math.random() * Math.PI * 2
+  });
+}
+
+function drawStars(t) {
+  ctx.fillStyle = '#0a0a12';
+  ctx.fillRect(0, 0, W, H);
+  for (var i = 0; i < stars.length; i++) {
+    var s = stars[i];
+    var a = 0.35 + 0.35 * Math.sin(t / 600 + s.p);
+    ctx.fillStyle = 'rgba(220,220,255,' + a.toFixed(2) + ')';
+    ctx.beginPath();
+    ctx.arc(s.x * W, s.y * H, s.r * (W / 380), 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawGhost(g, t) {
+  var conf = TYPES[g.type];
+  var flick = g.type === 'glitch' ? (Math.random() < 0.15 ? (Math.random() - 0.5) * g.size * 0.2 : 0) : 0;
+  var wob = Math.sin(t / 300 + g.wobble) * g.size * 0.06;
+  var cx = g.x + flick + wob;
+  var cy = g.y;
+  var r = g.size / 2;
+
+  ctx.save();
+  ctx.shadowColor = conf.glow;
+  ctx.shadowBlur = r * 0.9;
+
+  ctx.fillStyle = conf.color;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, Math.PI, 0, false);
+  ctx.lineTo(cx + r, cy + r * 0.7);
+  var waves = 5;
+  for (var i = 0; i < waves; i++) {
+    var wx = cx + r - (i + 0.5) * (2 * r / waves);
+    var wy = cy + r * (i % 2 === 0 ? 1.0 : 0.65);
+    ctx.lineTo(wx, wy);
+  }
+  ctx.lineTo(cx - r, cy);
+  ctx.closePath();
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = '#0a0a12';
+  ctx.beginPath();
+  ctx.ellipse(cx - r * 0.32, cy - r * 0.05, r * 0.16, r * 0.22, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(cx + r * 0.32, cy - r * 0.05, r * 0.16, r * 0.22, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (g.type === 'gold') {
+    ctx.strokeStyle = '#ffe9a8';
+    ctx.lineWidth = r * 0.06;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy - r * 1.35, r * 0.5, r * 0.16, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+var particles = [];
+function burst(x, y, color) {
+  for (var i = 0; i < 10; i++) {
+    var ang = Math.random() * Math.PI * 2;
+    var spd = 1 + Math.random() * 2.5;
+    particles.push({ x: x, y: y, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd, life: 1, color: color });
+  }
+}
+function drawParticles() {
+  for (var i = particles.length - 1; i >= 0; i--) {
+    var p = particles[i];
+    p.x += p.vx; p.y += p.vy; p.life -= 0.03;
+    if (p.life <= 0) { particles.splice(i, 1); continue; }
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 3 * (W / 380), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+}
+
+function updateHud() {
+  document.getElementById('hudScore').textContent = score;
+  document.getElementById('hudCombo').textContent = 'x' + combo;
+  document.getElementById('hudTime').textContent = Math.max(0, Math.ceil(timeLeft));
+}
+
+function loop(t) {
+  if (!running) return;
+  var dt = t - (loop.last || t);
+  loop.last = t;
+  elapsedMs += dt;
+  timeLeft -= dt / 1000;
+
+  var lv = LEVELS[level];
+  var spawnRate = Math.max(lv.spawnMin, lv.spawnBase - elapsedMs / 60);
+  if (t - lastSpawn > spawnRate) {
+    spawnGhost();
+    lastSpawn = t;
+  }
+
+  drawStars(t);
+
+  for (var i = ghosts.length - 1; i >= 0; i--) {
+    var g = ghosts[i];
+    if (g.dead) continue;
+    g.y += g.vy * dt * 0.06;
+    g.x += g.vx * dt * 0.06;
+    if (g.y - g.size > H) { ghosts.splice(i, 1); continue; }
+    drawGhost(g, t);
+  }
+  drawParticles();
+  updateHud();
+
+  if (timeLeft <= 0) {
+    endGame();
+    return;
+  }
+  rafId = requestAnimationFrame(loop);
+}
+
+function handleTap(clientX, clientY) {
+  var rect = canvas.getBoundingClientRect();
+  var x = (clientX - rect.left) / rect.width * W;
+  var y = (clientY - rect.top) / rect.height * H;
+  for (var i = ghosts.length - 1; i >= 0; i--) {
+    var g = ghosts[i];
+    if (g.dead) continue;
+    var dx = x - g.x, dy = y - g.y;
+    if (Math.sqrt(dx * dx + dy * dy) < g.size * 0.65) {
+      var conf = TYPES[g.type];
+      if (g.type === 'glitch') {
+        score = Math.max(0, score + conf.points);
+        combo = 1;
+        burst(g.x, g.y, '#ff5a6e');
+      } else {
+        score += conf.points * combo;
+        combo = Math.min(6, combo + 1);
+        burst(g.x, g.y, conf.glow);
+      }
+      ghosts.splice(i, 1);
+      return;
+    }
+  }
+}
+canvas.addEventListener('pointerdown', function(e){
+  handleTap(e.clientX, e.clientY);
+});
+
+function endGame() {
+  running = false;
+  cancelAnimationFrame(rafId);
+  document.getElementById('game').style.display = 'none';
+  document.getElementById('finalScreen').style.display = 'block';
+  document.getElementById('scoreOut').textContent = score;
+  var rank;
+  if (score < 150) rank = 'Exposed';
+  else if (score < 350) rank = 'Half-Shielded';
+  else if (score < 600) rank = 'Ghostlisted';
+  else rank = 'Fully Shielded';
+  document.getElementById('rankOut').textContent = rank;
+}
+
+document.getElementById('startBtn').addEventListener('click', function(){
+  document.getElementById('startScreen').style.display = 'none';
+  document.getElementById('game').style.display = 'block';
+  resize();
+  initStars();
+  ghosts = [];
+  particles = [];
+  score = 0; combo = 1; timeLeft = 25; elapsedMs = 0; lastSpawn = 0;
+  running = true;
+  loop.last = undefined;
+  rafId = requestAnimationFrame(loop);
+});
+
+document.getElementById('againBtn').addEventListener('click', function(){
+  document.getElementById('finalScreen').style.display = 'none';
+  document.getElementById('startScreen').style.display = 'block';
+});
+</script>
+</body>
+</html>
